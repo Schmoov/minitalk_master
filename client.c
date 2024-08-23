@@ -31,6 +31,28 @@ void	send_len(pid_t server_pid, size_t len)
 	}
 }
 
+void	send_string(pid_t server_pid, char *msg)
+{
+	int	i;
+	int	j;
+
+	i = 0;
+	while (i < strlen(msg))
+	{
+		j = 8;
+		while (j)
+		{
+			j--;
+			if ((msg[i] >> j) & 1)
+				kill(server_pid, SIGUSR2);
+			else
+				kill(server_pid, SIGUSR1);
+			pause();
+		}
+		i++;
+	}
+}
+
 int	main(int argc, char **argv)
 {
 	struct sigaction	act;
@@ -43,7 +65,7 @@ int	main(int argc, char **argv)
 	sigaction(SIGUSR2, &act, NULL);
 	establish_connection(server_pid);
 	send_len(server_pid, len);
+	send_string(server_pid, argv[2]);
 
 	write(1, "Great Success\n", 15);
-	//send_string();
 }

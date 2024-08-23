@@ -9,6 +9,7 @@ typedef struct {
 	bool	connected;
 	int		bit_len;
 	size_t	len;
+	bool	malloced;
 	int		bit_msg;
 	char	*msg;
 }			t_minitalk_s;
@@ -39,7 +40,19 @@ void	handler(int signal, siginfo_t *info, void *cont)
 			g_serv.len |= 1;
 		g_serv.bit_len++;
 	}
-		
+	else if (g_serv.bit_msg < 8 * g_serv.len)
+	{
+		if (!g_serv.malloced)
+		{
+			g_serv.msg = malloc(g_serv.len);
+			g_serv.malloced = true;
+//			write(1, "malloc\n", 7);
+		}
+		g_serv.msg[g_serv.bit_msg / 8] <<= 1;
+		if (info->si_signo == SIGUSR2)
+			g_serv.msg[g_serv.bit_msg / 8] |= 1;
+		g_serv.bit_msg++;
+	}
 	kill(info->si_pid, SIGUSR1);
 }
 
@@ -60,9 +73,11 @@ int	main(void)
 
 	while (1)
 	{
-		if (g_serv.bit_len == 8 * sizeof(size_t))
+		if (g_serv.bit_len == 8 * sizeof(size_t)
+			&& g_serv.bit_msg == 8 * g_serv.len)
 		{
-			printf("%zu\n", g_serv.len);
+//			write_bin(g_serv.msg + 1);
+			write(1, g_serv.msg, g_serv.len);
 			memset(&g_serv, 0, sizeof(g_serv));
 		}
 		pause();
