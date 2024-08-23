@@ -3,8 +3,17 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
-char	*g_server_str;
+typedef struct {
+	bool	connected;
+	int		bit_len;
+	size_t	len;
+	int		bit_msg;
+	char	*msg;
+}			t_minitalk_s;
+
+t_minitalk_s	g_serv;
 
 void	write_bin(char *c)
 {
@@ -19,42 +28,43 @@ void	write_bin(char *c)
 	write(2, "\n", 1);
 }
 		
-void	handler(int signal)
+void	handler(int signal, siginfo_t *info, void *cont)
 {
-	static int	bit = 0;
-
-
-	if (signal == SIGUSR2)
+	if (!g_serv.connected)
+		g_serv.connected = true;
+	else if (g_serv.bit_len < 8 * sizeof(size_t))
 	{
-		*g_server_str |= 1;
+		g_serv.len <<= 1;
+		if (info->si_signo == SIGUSR2)
+			g_serv.len |= 1;
+		g_serv.bit_len++;
 	}
-	bit++;
-	if (bit == 8)
-	{
-		g_server_str++;
-		bit = 0;
-	}
-	else
-		*g_server_str <<= 1;
+		
+	kill(info->si_pid, SIGUSR1);
 }
 
 int	main(void)
 {
+	memset(&g_serv, 0, sizeof(g_serv));
 	struct sigaction	act;
-	char	*og_ptr;
-
-	g_server_str = malloc(100000);
-	og_ptr = g_server_str;
-	memset(g_server_str, 0, 100000);
 
 	memset(&act, 0, sizeof(act));
-	act.sa_handler = handler;
+	act.sa_sigaction = handler;
+	act.sa_flags = SA_SIGINFO;
+
 	sigaction(SIGUSR1, &act, NULL);
 	sigaction(SIGUSR2, &act, NULL);
 
 	printf("%d\n", getpid());
 	fflush(stdout);
 
+	while (1)
+	{
+		if (g_serv.bit_len == 8 * sizeof(size_t))
+		{
+			printf("%zu\n", g_serv.len);
+			memset(&g_serv, 0, sizeof(g_serv));
+		}
 		pause();
-		write(1, og_ptr, g_server_str - og_ptr);
+	}
 }
