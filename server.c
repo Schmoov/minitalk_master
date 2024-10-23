@@ -1,85 +1,90 @@
-#include <unistd.h>
-#include <signal.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdbool.h>
+#include "minitalk.h"
 
-typedef struct {
-	bool	connected;
-	int		bit_len;
-	size_t	len;
-	bool	malloced;
-	int		bit_msg;
-	char	*msg;
-}			t_minitalk_s;
+volatile int g_serv_ack;
 
-volatile t_minitalk_s	g_serv;
-
-void	write_bin(char *c)
+void	serv_pause(void)
 {
-	char	byte;
-
-	for (int i = 0; i < 8; i++)
-	{
-		byte = (*c >> (7-i))&1;
-		byte += '0';
-		write(2, &byte, 1);
-	}
-	write(2, "\n", 1);
+	while (!g_serv_ack);
 }
-		
-void	handler(int signal, siginfo_t *info, void *cont)
+
+static void	serv_handler(int signal, siginfo_t *info, void *cont)
 {
-	if (!g_serv.connected)
-		g_serv.connected = true;
-	else if (g_serv.bit_len < 8 * sizeof(size_t))
+	int global;
+
+	(void) cont;
+	if (signal == SIGUSR2)
+		global = info->si_pid, write(1,"1",0);
+	else
+		global = -info->si_pid, write(1,"0",0);
+	g_serv_ack = global;
+}
+
+void	receive_len(t_minitalk *mntk)
+{
+	int		i;
+	pid_t	client_pid;
+
+	i = 0;
+	while (i < 8 * (int)sizeof(int))
 	{
-		g_serv.len <<= 1;
-		if (info->si_signo == SIGUSR2)
-			g_serv.len |= 1;
-		g_serv.bit_len++;
+		serv_pause();
+		mntk->len <<= 1;
+		if (g_serv_ack > 0)
+			mntk->len |= 1;
+		else
+			g_serv_ack = -g_serv_ack;
+		i++;
+		client_pid = g_serv_ack;
+		g_serv_ack = 0;
+		if (i == 8 * (int)sizeof(int))
+			mntk->msg = ft_calloc(mntk->len, 1);
+		kill(client_pid, SIGUSR1);
 	}
-	else if (g_serv.bit_msg < 8 * g_serv.len)
+}
+
+void	receive_body(t_minitalk *mntk)
+{
+	int		i;
+	pid_t	client_pid;
+
+	i = 0;
+	while (i < 8 * mntk->len)
 	{
-		if (!g_serv.malloced)
+		serv_pause();
+		mntk->msg[i / 8] <<= 1;
+		if (g_serv_ack > 0)
+			mntk->msg[i / 8] |= 1;
+		else
+			g_serv_ack = -g_serv_ack;
+		i++;
+		ft_printf("%d ", i);
+		client_pid = g_serv_ack;
+		g_serv_ack = 0;
+		if (i == 8 * mntk->len)
 		{
-			g_serv.msg = malloc(g_serv.len);
-			g_serv.malloced = true;
-//			write(1, "malloc\n", 7);
+			write(1, mntk->msg, mntk->len);
+			free(mntk->msg);
 		}
-		g_serv.msg[g_serv.bit_msg / 8] <<= 1;
-		if (info->si_signo == SIGUSR2)
-			g_serv.msg[g_serv.bit_msg / 8] |= 1;
-		g_serv.bit_msg++;
+		kill(client_pid, SIGUSR1);
 	}
-	kill(info->si_pid, SIGUSR1);
 }
+
 
 int	main(void)
 {
-	memset(&g_serv, 0, sizeof(g_serv));
 	struct sigaction	act;
+	t_minitalk			mntk;
 
-	memset(&act, 0, sizeof(act));
-	act.sa_sigaction = handler;
-	act.sa_flags = SA_SIGINFO;
-
+	ft_memset(&act, 0, sizeof(act));
+	ft_memset(&mntk, 0, sizeof(mntk));
+	act.sa_sigaction = serv_handler;
+	act.sa_flags = SA_SIGINFO | SA_RESTART;
 	sigaction(SIGUSR1, &act, NULL);
 	sigaction(SIGUSR2, &act, NULL);
-
-	printf("%d\n", getpid());
-	fflush(stdout);
-
+	ft_printf("%d\n", getpid());
 	while (1)
 	{
-		if (g_serv.bit_len == 8 * sizeof(size_t)
-			&& g_serv.bit_msg == 8 * g_serv.len)
-		{
-//			write_bin(g_serv.msg + 1);
-			write(1, g_serv.msg, g_serv.len);
-			memset(&g_serv, 0, sizeof(g_serv));
-		}
-		pause();
+		receive_len(&mntk);
+		receive_body(&mntk);
 	}
 }
